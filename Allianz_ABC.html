@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>养老金计算器</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background-color: #f9f9f9; }
+    input, button { padding: 8px; margin: 6px 0; width: 100%; box-sizing: border-box; }
+    .result, .group { background: #fff; padding: 15px; border-radius: 8px; margin-top: 20px; box-shadow: 0 0 5px #ccc; }
+    h2, h3 { margin-top: 0; }
+  </style>
+</head>
+<body>
+<h2>养老金计算器 - Allianz ABC 模型</h2>
+<div class="group">
+  <label>存入保险金：</label><input type="number" id="in_money" value="100000">
+  <label>Bonus（%）：</label><input type="number" id="in_bo" value="25">
+  <label>平均年指数增长率（%）：</label><input type="number" id="year_rate" value="3">
+  <label>投保年龄：</label><input type="number" id="s_age" value="52">
+  <label>开始拿钱/退休年龄：</label><input type="number" id="e_age" value="60">
+  <label>预期寿命：</label><input type="number" id="year_age" value="90">
+  <label>PIV增长倍数：</label><input type="number" id="p_b" value="2.5">
+  <label>AV增长倍数：</label><input type="number" id="a_b" value="0.5">
+  <label>50岁payout rate（%）：</label><input type="number" id="start_rate" value="3.5">
+  <button onclick="calculate()">开始计算</button>
+  <button onclick="findOptimalRetire()">寻找最优退休年龄</button>
+</div>
+
+<div class="result" id="output" style="display:none;"></div>
+<div class="result" id="optimalOutput" style="display:none;"></div>
+
+<script>
+function get_payoutrate(age) {
+  if (age >= 50 && age <= 54) return 0;
+  if (age >= 55 && age <= 59) return 0.5;
+  if (age >= 60 && age <= 69) return 1;
+  if (age >= 70 && age <= 79) return 1.5;
+  if (age >= 80) return 2;
+  return 0;
+}
+
+function get_PIV(in_money, in_bo, rate, s_age, e_age, p_b) {
+  let M = in_money * (1 + in_bo / 100);
+  for (let i = s_age; i < e_age; i++) {
+    M *= (1 + (p_b * rate) / 100);
+  }
+  return M;
+}
+
+function get_AV(in_money, rate, s_age, e_age, a_b) {
+  let A = in_money;
+  for (let i = s_age; i < e_age; i++) {
+    A *= (1 + (a_b * rate) / 100);
+  }
+  return A;
+}
+
+function get_year_income(in_money, in_bo, year_rate, s_age, e_age, start_payout_rate, p_b, a_b, year_age) {
+  let logs = [];
+  let av_zero_age = null;
+  if (year_age < e_age) return {};
+
+  let PIV = get_PIV(in_money, in_bo, year_rate, s_age, e_age, p_b);
+  let AV = get_AV(in_money, year_rate, s_age, e_age, a_b);
+  let payout_rate = start_payout_rate + get_payoutrate(e_age);
+  let pension = PIV * (payout_rate / 100);
+
+  let year = year_age - e_age;
+  let thisyear = pension;
+  let sum = pension;
+  let current_age = e_age;
+  let AV_now = AV;
+  let PIV_now = PIV;
+
+  for (let i = 1; i <= year; i++) {
+    thisyear *= (1 + (1.5 * year_rate / 100));
+    sum += thisyear;
+    current_age++;
+
+    if (AV_now > 0) {
+      AV_now *= (1 + (year_rate * a_b) / 100);
+      PIV_now *= (1 + (year_rate * p_b) / 100);
+      let reduce = 1 - thisyear / AV_now;
+      AV_now *= reduce;
+      PIV_now *= reduce;
+      if (AV_now <= 0 && av_zero_age === null) av_zero_age = current_age;
+    } else {
+      AV_now = 0;
+      PIV_now = 0;
+    }
+
+    if (i % 5 === 0) {
+      logs.push(`在 ${e_age + i} 岁时，每年领取：${thisyear.toFixed(2)}`);
+    }
+  }
+
+  return {
+    PIV_start: PIV.toFixed(2),
+    AV_start: AV.toFixed(2),
+    payout_rate: payout_rate.toFixed(2),
+    pension: pension.toFixed(2),
+    logs: logs,
+    final_age: year_age,
+    final_PIV: PIV_now.toFixed(2),
+    final_AV: AV_now.toFixed(2),
+    final25_AV: (AV_now*2.5).toFixed(2),
+    final_thisyear: thisyear.toFixed(2),
+    sum_money: sum.toFixed(2),
+    av_zero_age: av_zero_age
+  };
+}
+
+function calculate() {
+  let in_money = parseFloat(document.getElementById("in_money").value);
+  let in_bo = parseFloat(document.getElementById("in_bo").value);
+  let rate = parseFloat(document.getElementById("year_rate").value);
+  let s_age = parseInt(document.getElementById("s_age").value);
+  let e_age = parseInt(document.getElementById("e_age").value);
+  let year_age = parseInt(document.getElementById("year_age").value);
+  let p_b = parseFloat(document.getElementById("p_b").value);
+  let a_b = parseFloat(document.getElementById("a_b").value);
+  let start_rate = parseFloat(document.getElementById("start_rate").value);
+
+  let result = get_year_income(in_money, in_bo, rate, s_age, e_age, start_rate, p_b, a_b, year_age);
+  if (!result || Object.keys(result).length === 0) {
+    document.getElementById("output").innerHTML = "<p>寿命小于退休年龄，未领取养老金。</p>";
+    document.getElementById("output").style.display = "block";
+    return;
+  }
+
+  let html = `<h3>退休当年 (${e_age} 岁)</h3>` +
+    `<p>PIV: ${result.PIV_start}</p>` +
+    `<p>AV: ${result.AV_start}</p>` +
+    `<p>领取比例: ${result.payout_rate}%</p>` +
+    `<p>退休金: ${result.pension}</p>`;
+
+  html += `<h3>每五年领取金额</h3><ul>` + result.logs.map(log => `<li>${log}</li>`).join('') + `</ul>`;
+
+  if (result.av_zero_age !== null) {
+    html += `<p><strong>AV 在 ${result.av_zero_age} 岁时变为 0</strong></p>`;
+  }
+
+  html += `<h3>${result.final_age} 岁（死亡年龄）</h3>` +
+    `<p>最终 PIV: ${result.final_PIV}</p>` +
+    `<p>最终 AV: ${result.final_AV}</p>` +
+    `<p>2.5倍 AV: ${result.final25_AV}</p>` +
+    `<p>当年领取: ${result.final_thisyear}</p>` +
+    `<p>总领取金额: ${result.sum_money}</p>`;
+
+  document.getElementById("output").innerHTML = html;
+  document.getElementById("output").style.display = "block";
+}
+
+function findOptimalRetire() {
+  let in_money = parseFloat(document.getElementById("in_money").value);
+  let in_bo = parseFloat(document.getElementById("in_bo").value);
+  let rate = parseFloat(document.getElementById("year_rate").value);
+  let s_age = parseInt(document.getElementById("s_age").value);
+  let year_age = parseInt(document.getElementById("year_age").value);
+  let p_b = parseFloat(document.getElementById("p_b").value);
+  let a_b = parseFloat(document.getElementById("a_b").value);
+  let start_rate = parseFloat(document.getElementById("start_rate").value);
+
+  let best_age = s_age + 1;
+  let max_sum = 0;
+  for (let e_age = s_age + 1; e_age < year_age; e_age++) {
+    let result = get_year_income(in_money, in_bo, rate, s_age, e_age, start_rate, p_b, a_b, year_age);
+    if (result && parseFloat(result.sum_money) > max_sum) {
+      max_sum = parseFloat(result.sum_money);
+      best_age = e_age;
+    }
+  }
+
+  document.getElementById("optimalOutput").innerHTML = `<h3>最优退休年龄建议</h3><p>最佳退休年龄为：<strong>${best_age}</strong> 岁</p><p>总领取金额最大为：<strong>${max_sum.toFixed(2)}</strong></p>`;
+  document.getElementById("optimalOutput").style.display = "block";
+}
+</script>
+</body>
+</html>
